@@ -2,6 +2,7 @@ package micro
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -20,7 +21,34 @@ func VersionInfo() string {
 	return gitCommit + ", " + buildDate
 }
 
+type Logger interface {
+	SetAttachment(map[string]interface{}) // for log ctx
+	Info(string)
+	Fatal(interface{})
+}
+
+var _ Logger = &defaultLogger{}
+
+type defaultLogger struct {
+	l *log.Logger
+}
+
+func (d *defaultLogger) SetAttachment(kv map[string]interface{}) {
+	for k, v := range kv {
+		d.l.SetPrefix(k + "=" + fmt.Sprint(v) + " ")
+	}
+}
+
+func (d *defaultLogger) Info(str string) {
+	d.l.Println(str)
+}
+
+func (d *defaultLogger) Fatal(v interface{}) {
+	d.l.Fatalln(v)
+}
+
 type Micro interface {
+	WithLogger(Logger)
 	AddCloseFunc(f func() error) // exec when Close func is called
 	ServeGRPC(bindAddr string, server GRPCServer)
 	ServeHTTP(bindAddr string, handler http.Handler)
@@ -29,6 +57,7 @@ type Micro interface {
 
 type micro struct {
 	name       string
+	logger     Logger
 	closeFuncs []func() error
 	errChan    chan error
 	serveFuncs []func()
@@ -37,6 +66,7 @@ type micro struct {
 // New create Micro, serviceName.0 is service name.
 func New(serviceName ...string) Micro {
 	m := &micro{
+		logger:     &defaultLogger{l: log.New(os.Stdout, "", log.LstdFlags)},
 		errChan:    make(chan error, 1),
 		closeFuncs: make([]func() error, 0),
 		serveFuncs: make([]func(), 0),
@@ -44,9 +74,20 @@ func New(serviceName ...string) Micro {
 
 	if len(serviceName) != 0 {
 		m.name = serviceName[0]
+		m.WithLogger(m.logger)
 	}
 
 	return m
+}
+
+func (m *micro) WithLogger(l Logger) {
+	if m.name != "" {
+		l.SetAttachment(map[string]interface{}{
+			"svc": m.name,
+		})
+	}
+
+	m.logger = l
 }
 
 // AddResCloseFunc add resource close func
@@ -129,8 +170,8 @@ func (m *micro) ServeHTTP(bindAddr string, handler http.Handler) {
 func (m *micro) close() {
 	for i := len(m.closeFuncs) - 1; i >= 0; i-- {
 		err := m.closeFuncs[i]()
-		if err != nil {
-			log.Println(err)
+		if err != nil && m.logger != nil {
+			m.logger.Info(err.Error())
 		}
 	}
 }
@@ -144,8 +185,8 @@ func (m *micro) Start() {
 
 	defer func() {
 		m.close()
-		if err != nil {
-			log.Fatalf("micro %q receive err signal: %s\n", m.name, err)
+		if err != nil && m.logger != nil {
+			m.logger.Fatal(fmt.Sprintf("micro receive err signal: %s\n", err))
 		}
 	}()
 
@@ -153,13 +194,17 @@ func (m *micro) Start() {
 		go m.serveFuncs[i]()
 	}
 
-	log.Println("micro " + m.name + " start")
+	if m.logger != nil {
+		m.logger.Info("micro start")
+	}
 
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, WatchSignal...)
 	select {
 	case s := <-ch:
-		log.Printf("micro %q receive stop signal: %s\n", m.name, s)
+		if m.logger != nil {
+			m.logger.Info(fmt.Sprintf("micro receive stop signal: %s\n", s))
+		}
 	case err = <-m.errChan:
 	}
 }
