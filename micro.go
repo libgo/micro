@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -119,10 +119,33 @@ type GRPCServer interface {
 	GracefulStop()
 }
 
+// using toupper(name(- to _))_BIND[SUFFIX?] > MICRO_BIND[SUFFIX?] > default
+func (m *micro) genBind(addr string) string {
+	suffix := ""
+
+	if s := strings.Split(addr, "|"); len(s) == 2 {
+		suffix, addr = strings.ToUpper(s[0]), s[1]
+	}
+
+	// replace and to upper
+	if s := os.Getenv(strings.ToUpper(strings.Replace(m.name, "-", "_", -1)) + "_BIND" + suffix); s != "" {
+		addr = s
+	} else if s := os.Getenv("MICRO_BIND" + suffix); s != "" {
+		addr = s
+	}
+
+	// adding : as prefix if not exist
+	if !strings.Contains(addr, ":") {
+		addr = ":" + addr
+	}
+
+	return addr
+}
+
 // ServeGRPC is helper func to start gRPC server
-func (m *micro) ServeGRPC(bindAddr string, server GRPCServer) {
+func (m *micro) ServeGRPC(addr string, server GRPCServer) {
 	m.serveFuncs = append(m.serveFuncs, func() {
-		ln, err := m.createListener(bindAddr)
+		ln, err := m.createListener(m.genBind(addr))
 		if err != nil {
 			m.errChan <- err
 			return
@@ -141,9 +164,9 @@ func (m *micro) ServeGRPC(bindAddr string, server GRPCServer) {
 }
 
 // TODO other params can optimize
-func (m *micro) ServeHTTP(bindAddr string, handler http.Handler) {
+func (m *micro) ServeHTTP(addr string, handler http.Handler) {
 	m.serveFuncs = append(m.serveFuncs, func() {
-		ln, err := m.createListener(bindAddr)
+		ln, err := m.createListener(m.genBind(addr))
 		if err != nil {
 			m.errChan <- err
 			return
@@ -207,28 +230,4 @@ func (m *micro) Start() {
 		}
 	case err = <-m.errChan:
 	}
-}
-
-// Bind is a helper func to read env port and returns bind addr
-func Bind(addr string, envName ...string) string {
-	env := "bind_addr"
-	if len(envName) != 0 {
-		env = envName[0]
-	}
-
-	if p := os.Getenv(env); p != "" {
-		addr = p
-	}
-
-	// :port, it panics if port is empty
-	if addr[0] == ':' {
-		return addr
-	}
-
-	// port only, yes, it may return :0, caution
-	if _, err := strconv.Atoi(addr); err == nil {
-		return ":" + addr
-	}
-
-	return addr
 }
