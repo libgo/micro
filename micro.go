@@ -22,7 +22,7 @@ func VersionInfo() string {
 }
 
 type Logger interface {
-	SetAttachment(map[string]interface{}) // for log ctx
+	SetAttach(map[string]interface{}) // for log ctx
 	Info(string)
 	Fatal(interface{})
 }
@@ -33,7 +33,7 @@ type defaultLogger struct {
 	l *log.Logger
 }
 
-func (d *defaultLogger) SetAttachment(kv map[string]interface{}) {
+func (d *defaultLogger) SetAttach(kv map[string]interface{}) {
 	for k, v := range kv {
 		d.l.SetPrefix(k + "=" + fmt.Sprint(v) + " ")
 	}
@@ -82,7 +82,7 @@ func New(serviceName ...string) Micro {
 
 func (m *micro) WithLogger(l Logger) {
 	if m.name != "" {
-		l.SetAttachment(map[string]interface{}{
+		l.SetAttach(map[string]interface{}{
 			"svc": m.name,
 		})
 	}
