@@ -87,6 +87,12 @@ func (m *micro) WithLogger(l Logger) {
 		})
 	}
 
+	if gitCommit != "" {
+		l.SetAttach(map[string]interface{}{
+			"ver": gitCommit,
+		})
+	}
+
 	m.logger = l
 }
 
