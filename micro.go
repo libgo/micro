@@ -93,6 +93,23 @@ func (m *micro) WithLogger(l Logger) {
 		})
 	}
 
+	// if Logger impl Close() error
+	if li, ok := l.(interface {
+		Close() error
+	}); ok {
+		m.closeFuncs = append(m.closeFuncs, li.Close)
+	}
+
+	// if Logger impl Close()
+	if li, ok := l.(interface {
+		Close()
+	}); ok {
+		m.closeFuncs = append(m.closeFuncs, func() error {
+			li.Close()
+			return nil
+		})
+	}
+
 	m.logger = l
 }
 
