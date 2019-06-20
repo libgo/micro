@@ -24,7 +24,7 @@ func VersionInfo() string {
 type Logger interface {
 	SetAttach(map[string]interface{}) // for log ctx
 	Info(string)
-	Fatal(interface{})
+	Error(interface{})
 }
 
 var _ Logger = &defaultLogger{}
@@ -43,13 +43,13 @@ func (d *defaultLogger) Info(str string) {
 	d.l.Println(str)
 }
 
-func (d *defaultLogger) Fatal(v interface{}) {
-	d.l.Fatalln(v)
+func (d *defaultLogger) Error(v interface{}) {
+	d.l.Println(v)
 }
 
 type Micro interface {
 	WithLogger(Logger)
-	AddCloseFunc(f func() error) // exec when Close func is called
+	AddCloseFunc(f ...func() error) // exec when Close func is called
 	ServeGRPC(bindAddr string, server GRPCServer)
 	ServeHTTP(bindAddr string, handler http.Handler)
 	Start()
@@ -63,8 +63,8 @@ type micro struct {
 	serveFuncs []func()
 }
 
-// New create Micro, serviceName.0 is service name.
-func New(serviceName ...string) Micro {
+// New create Micro, svcName.0 use as service name.
+func New(svcName ...string) Micro {
 	m := &micro{
 		logger:     &defaultLogger{l: log.New(os.Stdout, "", log.LstdFlags)},
 		errChan:    make(chan error, 1),
@@ -72,14 +72,15 @@ func New(serviceName ...string) Micro {
 		serveFuncs: make([]func(), 0),
 	}
 
-	if len(serviceName) != 0 {
-		m.name = serviceName[0]
+	if len(svcName) != 0 {
+		m.name = svcName[0]
 		m.WithLogger(m.logger)
 	}
 
 	return m
 }
 
+// WithLogger set micro logger, it add svc and ver if not empty.
 func (m *micro) WithLogger(l Logger) {
 	if m.name != "" {
 		l.SetAttach(map[string]interface{}{
@@ -93,29 +94,31 @@ func (m *micro) WithLogger(l Logger) {
 		})
 	}
 
+	// log should close last, prepend to m.closeFuncs
+
 	// if Logger impl Close() error
 	if li, ok := l.(interface {
 		Close() error
 	}); ok {
-		m.closeFuncs = append(m.closeFuncs, li.Close)
+		m.closeFuncs = append([]func() error{li.Close}, m.closeFuncs...)
 	}
 
 	// if Logger impl Close()
 	if li, ok := l.(interface {
 		Close()
 	}); ok {
-		m.closeFuncs = append(m.closeFuncs, func() error {
+		m.closeFuncs = append([]func() error{func() error {
 			li.Close()
 			return nil
-		})
+		}}, m.closeFuncs...)
 	}
 
 	m.logger = l
 }
 
-// AddResCloseFunc add resource close func
-func (m *micro) AddCloseFunc(f func() error) {
-	m.closeFuncs = append(m.closeFuncs, f)
+// AddCloseFunc add resource close func, used for resource release FILO when exit.
+func (m *micro) AddCloseFunc(f ...func() error) {
+	m.closeFuncs = append(m.closeFuncs, f...)
 }
 
 func (m *micro) createListener(bindAddr string) (net.Listener, error) {
@@ -186,6 +189,7 @@ func (m *micro) ServeGRPC(addr string, server GRPCServer) {
 	})
 }
 
+// ServeHTTP is helper func to start HTTP server
 // TODO other params can optimize
 func (m *micro) ServeHTTP(addr string, handler http.Handler) {
 	m.serveFuncs = append(m.serveFuncs, func() {
@@ -230,10 +234,10 @@ func (m *micro) Start() {
 	var err error
 
 	defer func() {
-		m.close()
 		if err != nil && m.logger != nil {
-			m.logger.Fatal(fmt.Sprintf("micro receive err signal: %s\n", err))
+			m.logger.Error(fmt.Sprintf("micro receive err signal: %s\n", err))
 		}
+		m.close()
 	}()
 
 	for i := range m.serveFuncs {
