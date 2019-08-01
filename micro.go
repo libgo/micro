@@ -178,7 +178,20 @@ func (m *micro) ServeGRPC(addr string, server GRPCServer) {
 		}
 
 		m.AddCloseFunc(func() error {
-			server.GracefulStop()
+			stopSig := make(chan struct{})
+			go func() {
+				server.GracefulStop()
+				close(stopSig)
+			}()
+
+			select {
+			case <-stopSig:
+			case <-time.After(time.Second * 45):
+				if m.logger != nil {
+					m.logger.Info("graceful max exceed, force stop")
+				}
+			}
+
 			return nil
 		})
 
@@ -204,7 +217,7 @@ func (m *micro) ServeHTTP(addr string, handler http.Handler) {
 		}
 
 		m.AddCloseFunc(func() error {
-			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*30)
+			ctx, cancelFunc := context.WithTimeout(context.Background(), time.Second*45)
 			defer cancelFunc()
 			return server.Shutdown(ctx)
 		})
