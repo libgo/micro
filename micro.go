@@ -145,12 +145,15 @@ type GRPCServer interface {
 	GracefulStop()
 }
 
-// using toupper(name(- to _))_BIND[SUFFIX?] > MICRO_BIND[SUFFIX?] > default
+// using toupper(name(- to _))_BIND_[SUFFIX?] > MICRO_BIND[_SUFFIX?] > default
 func (m *micro) genBind(addr string) string {
 	suffix := ""
 
 	if s := strings.Split(addr, "|"); len(s) == 2 {
 		suffix, addr = strings.ToUpper(s[0]), s[1]
+		if suffix != "" {
+			suffix = "_" + suffix
+		}
 	}
 
 	// replace and to upper
