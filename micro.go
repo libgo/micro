@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -56,6 +57,7 @@ type Micro interface {
 }
 
 type micro struct {
+	mu         sync.RWMutex
 	name       string
 	logger     Logger
 	closeFuncs []func() error
@@ -118,7 +120,9 @@ func (m *micro) WithLogger(l Logger) {
 
 // AddCloseFunc add resource close func, used for resource release FILO when exit.
 func (m *micro) AddCloseFunc(f ...func() error) {
+	m.mu.Lock()
 	m.closeFuncs = append(m.closeFuncs, f...)
+	m.mu.Unlock()
 }
 
 func (m *micro) createListener(bindAddr string) (net.Listener, error) {
@@ -234,12 +238,14 @@ func (m *micro) ServeHTTP(addr string, handler http.Handler) {
 
 // close all added resource FILO
 func (m *micro) close() {
+	m.mu.RLock()
 	for i := len(m.closeFuncs) - 1; i >= 0; i-- {
 		err := m.closeFuncs[i]()
 		if err != nil && m.logger != nil {
 			m.logger.Info(err.Error())
 		}
 	}
+	m.mu.RLock()
 }
 
 // WatchSignal notify signal to stop running
