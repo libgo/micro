@@ -242,10 +242,10 @@ func (m *micro) close() {
 	for i := len(m.closeFuncs) - 1; i >= 0; i-- {
 		err := m.closeFuncs[i]()
 		if err != nil && m.logger != nil {
-			m.logger.Info(err.Error())
+			m.logger.Error(err.Error())
 		}
 	}
-	m.mu.RLock()
+	m.mu.RUnlock()
 }
 
 // WatchSignal notify signal to stop running
